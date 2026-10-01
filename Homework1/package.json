@@ -1,0 +1,36 @@
+{
+  "name": "minicurl",
+  "version": "1.0.0",
+  "description": "A curl-like command line HTTP client written in TypeScript",
+  "keywords": [
+    "curl",
+    "http",
+    "cli",
+    "typescript"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "minicurl": "./dist/src/cli.js"
+  },
+  "main": "./dist/src/cli.js",
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pretest": "npm run build",
+    "test": "node --test \"dist/test/*.test.js\"",
+    "start": "node dist/cli.js",
+    "dev": "tsc -p tsconfig.json --watch"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}

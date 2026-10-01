@@ -1,0 +1,24 @@
+# minicurl 設定檔範例（--config .mycurlrc.example）
+# 每行一個選項，# 開頭為註解。
+# 命令列上後出現的選項會覆蓋這裡的設定。
+
+# --- 顯示 ---
+silent
+show-error
+
+# --- 連線 ---
+location
+max-redirs 10
+connect-timeout 15
+retry 3
+
+# --- 標頭 ---
+-A "minicurl/1.0.0 (config)"
+-H "Accept-Language: zh-TW,zh;q=0.9,en;q=0.8"
+
+# --- 壓縮 ---
+compressed
+
+# 也可以使用短選項寫法：
+# -s
+# -X GET
