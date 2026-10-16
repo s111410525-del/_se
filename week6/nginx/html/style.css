@@ -1,0 +1,182 @@
+:root {
+    --bg: #0f172a;
+    --card: #1e293b;
+    --card-2: #273449;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --ok: #22c55e;
+    --bad: #ef4444;
+    --warn: #f59e0b;
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    font-family: "Segoe UI", system-ui, -apple-system, "Noto Sans TC", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+}
+
+.wrap { max-width: 1000px; margin: 0 auto; padding: 0 20px; }
+
+header {
+    background: linear-gradient(135deg, #1e3a8a, #0f766e);
+    padding: 32px 0 24px;
+    margin-bottom: 24px;
+}
+
+header h1 { margin: 0 0 4px; font-size: 1.7rem; }
+.subtitle { margin: 0; color: #e0f2fe; }
+.refresh { margin: 8px 0 0; font-size: .85rem; color: #cbd5e1; }
+
+.card {
+    background: var(--card);
+    border: 1px solid #334155;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.card h2 {
+    margin: 0 0 16px;
+    font-size: 1.1rem;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+/* 架構圖 */
+.arch {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.node {
+    background: var(--card-2);
+    border: 1px solid #475569;
+    border-radius: 10px;
+    padding: 12px 16px;
+    text-align: center;
+    min-width: 130px;
+}
+
+.node .icon { font-size: 1.5rem; display: block; }
+.node strong { display: block; }
+.node small { color: var(--muted); font-size: .75rem; }
+
+.stack { display: flex; flex-direction: column; gap: 10px; }
+.arrow { color: var(--accent); font-size: 1.4rem; }
+
+/* 狀態卡 */
+.grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+}
+
+.status {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--card-2);
+    border: 1px solid #475569;
+    border-radius: 10px;
+    padding: 14px;
+}
+
+.status small { display: block; color: var(--muted); font-size: .78rem; }
+
+.dot {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    flex: 0 0 auto;
+}
+.dot.up { background: var(--ok); box-shadow: 0 0 10px var(--ok); }
+.dot.down { background: var(--bad); box-shadow: 0 0 10px var(--bad); }
+.dot.loading { background: var(--warn); }
+
+.detail {
+    background: #0b1220;
+    border: 1px solid #334155;
+    border-radius: 8px;
+    padding: 12px;
+    margin: 16px 0 0;
+    font-size: .78rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 260px;
+    overflow: auto;
+}
+
+/* 表單與按鈕 */
+.row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+
+input, textarea {
+    background: #0b1220;
+    border: 1px solid #475569;
+    color: var(--text);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font: inherit;
+    flex: 1 1 160px;
+}
+
+textarea { width: 100%; resize: vertical; margin-bottom: 12px; }
+
+button {
+    background: var(--accent);
+    color: #04263a;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 18px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+button:hover { filter: brightness(1.08); }
+button.ghost {
+    background: transparent;
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    font-size: .8rem;
+    padding: 6px 12px;
+    margin-left: auto;
+}
+
+/* 留言列表 */
+.notes { list-style: none; padding: 0; margin: 0; }
+
+.notes li {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    background: var(--card-2);
+    border: 1px solid #475569;
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 8px;
+}
+
+.notes .meta { color: var(--muted); font-size: .75rem; display: block; }
+.notes .del {
+    background: transparent;
+    color: var(--bad);
+    border: 1px solid var(--bad);
+    padding: 4px 10px;
+    font-size: .75rem;
+}
+.muted { color: var(--muted); }
+
+footer { text-align: center; color: var(--muted); font-size: .8rem; padding: 20px 0 40px; }
+
+@media (max-width: 620px) {
+    .arch { flex-direction: column; }
+    .arrow { transform: rotate(90deg); }
+}

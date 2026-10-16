@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Docker 微服務系統展示</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <header>
+        <div class="wrap">
+            <h1>Docker 微服務系統</h1>
+            <p class="subtitle">Nginx (反向代理) · Node.js API · Python Analyzer · PostgreSQL</p>
+            <p class="refresh">最後更新：<span id="updated">—</span></p>
+        </div>
+    </header>
+
+    <main class="wrap">
+        <!-- 系統架構 -->
+        <section class="card">
+            <h2>系統架構</h2>
+            <div class="arch">
+                <div class="node client">
+                    <span class="icon">🌐</span>
+                    <strong>瀏覽器</strong>
+                    <small>Client</small>
+                </div>
+                <div class="arrow">→</div>
+                <div class="node nginx">
+                    <span class="icon">🚦</span>
+                    <strong>Nginx</strong>
+                    <small>:80 反向代理 / 靜態網頁</small>
+                </div>
+                <div class="arrow">→</div>
+                <div class="stack">
+                    <div class="node api">
+                        <span class="icon">🟩</span>
+                        <strong>Node.js API</strong>
+                        <small>:3000 /api/*</small>
+                    </div>
+                    <div class="node py">
+                        <span class="icon">🐍</span>
+                        <strong>Python Analyzer</strong>
+                        <small>:8000 /py/*</small>
+                    </div>
+                </div>
+                <div class="arrow">→</div>
+                <div class="node db">
+                    <span class="icon">🐘</span>
+                    <strong>PostgreSQL</strong>
+                    <small>:5432 資料庫</small>
+                </div>
+            </div>
+        </section>
+
+        <!-- 服務狀態 -->
+        <section class="card">
+            <h2>服務即時狀態 <button id="refreshBtn" class="ghost">立即重新整理</button></h2>
+            <div class="grid" id="statusGrid">
+                <div class="status" data-service="nginx">
+                    <div class="dot loading"></div>
+                    <div><strong>Nginx</strong><small>檢查中…</small></div>
+                </div>
+                <div class="status" data-service="api">
+                    <div class="dot loading"></div>
+                    <div><strong>Node.js API</strong><small>檢查中…</small></div>
+                </div>
+                <div class="status" data-service="python">
+                    <div class="dot loading"></div>
+                    <div><strong>Python Analyzer</strong><small>檢查中…</small></div>
+                </div>
+                <div class="status" data-service="db">
+                    <div class="dot loading"></div>
+                    <div><strong>PostgreSQL</strong><small>檢查中…</small></div>
+                </div>
+            </div>
+            <pre id="apiDetail" class="detail"></pre>
+        </section>
+
+        <!-- 資料庫 CRUD 示範 -->
+        <section class="card">
+            <h2>資料庫示範（PostgreSQL）</h2>
+            <form id="noteForm" class="row">
+                <input id="noteAuthor" type="text" placeholder="你的名字" maxlength="40">
+                <input id="noteContent" type="text" placeholder="留一句話給這個系統…" maxlength="500" required>
+                <button type="submit">新增留言</button>
+            </form>
+            <ul id="noteList" class="notes"><li class="muted">載入中…</li></ul>
+        </section>
+
+        <!-- Python 分析服務示範 -->
+        <section class="card">
+            <h2>文字分析示範（Python + FastAPI）</h2>
+            <textarea id="analyzeText" rows="4" placeholder="貼上一段文字，交給 Python 微服務分析…">Docker makes it easy to package applications into isolated microservices.</textarea>
+            <div class="row">
+                <button id="analyzeBtn">分析文字</button>
+            </div>
+            <div id="analyzeResult" class="detail"></div>
+        </section>
+    </main>
+
+    <footer class="wrap">
+        <p>Software Engineering · Docker Homework · 2026</p>
+    </footer>
+
+    <script src="/app.js"></script>
+</body>
+</html>
