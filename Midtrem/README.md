@@ -2,7 +2,7 @@
 -------|----------|--------------------|---------------------|-------------
 1          | curl | 是 | | [01](https://github.com/s111410525-del/_se/tree/main/Homework1)
 2          | 校務系統 | 是 | | [02](https://github.com/s111410525-del/_se/tree/main/Homework2)
-3          | 有價值專案 | 是 |   | [03]() |
+3          | 有價值專案 | 是 |   | [03](https://github.com/s111410525-del/_se/tree/main/Homework3) |
 4          | git flow | 是 |   |  [04](https://github.com/s111410525-del/_se/tree/main/week4) | 
 5          |(放假)| 是 |  |  | 
 6          | docker | 是 |  | [06](https://github.com/s111410525-del/_se/tree/main/week6) |

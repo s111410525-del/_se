@@ -2,6 +2,8 @@
 
 一個可以直接部署到 **Cloudflare Workers** 的部落格網站，包含文章、留言板與檔案下載。依照 [用 Cloudflare 架設網站](https://github.com/cccbook/cccbook2026/tree/main/%E9%9B%BB%E8%85%A6/%E7%B6%B2%E7%AB%99%E8%A8%AD%E8%A8%88/%E7%94%A8Cloudflare%E6%9E%B6%E8%A8%AD%E7%B6%B2%E7%AB%99) 第 6 章的三合一專案實作，並參考 [ccc-cloudflare/test-apps](https://github.com/ccc-cloudflare/test-apps/) 的自包含慣例。
 
+> 本專案使用 [opencode](https://opencode.ai) 完成程式開發、本機測試與文件撰寫。
+
 ## 功能
 
 | 功能 | 服務 |
