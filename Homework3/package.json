@@ -1,0 +1,35 @@
+{
+  "name": "jobbeam-homework3",
+  "version": "1.0.0",
+  "private": true,
+  "description": "職光 JobBeam：找工作、私訊應徵與企業付費曝光的求職平台",
+  "keywords": [
+    "job-board",
+    "recruitment",
+    "messaging",
+    "typescript",
+    "ssr"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/src/server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pretest": "npm run build",
+    "test": "npm run test:unit && npm run test:system",
+    "test:unit": "node --test \"dist/test/unit/*.test.js\"",
+    "test:system": "node --test \"dist/test/system/*.test.js\"",
+    "test:coverage": "node --test --experimental-test-coverage \"dist/test/unit/*.test.js\" \"dist/test/system/*.test.js\"",
+    "start": "node dist/src/server.js",
+    "dev": "tsc -p tsconfig.json --watch"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  }
+}

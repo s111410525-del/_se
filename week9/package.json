@@ -1,0 +1,18 @@
+{
+  "name": "edgeblog",
+  "version": "1.0.0",
+  "private": true,
+  "description": "在 Cloudflare Workers 上運行的部落格、留言板與檔案下載網站",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "check": "node --check src/worker.js && node --check public/app.js",
+    "db:local": "wrangler d1 execute edgeblog-db --local --file=schema.sql",
+    "seed:local": "wrangler d1 execute edgeblog-db --local --file=seed.sql",
+    "files:local": "wrangler r2 object put edgeblog-files/guide.md --file=files/guide.md --local && wrangler r2 object put edgeblog-files/cloudflare-checklist.md --file=files/cloudflare-checklist.md --local && wrangler r2 object put edgeblog-files/sample-data.csv --file=files/sample-data.csv --local",
+    "setup:local": "npm run db:local && npm run seed:local && npm run files:local"
+  },
+  "devDependencies": {
+    "wrangler": "^4"
+  }
+}

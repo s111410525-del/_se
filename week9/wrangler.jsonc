@@ -1,0 +1,41 @@
+// wrangler 設定：https://developers.cloudflare.com/workers/wrangler/configuration/
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "edgeblog",
+  "main": "src/worker.js",
+  "compatibility_date": "2025-11-01",
+
+  // D1：部署前先建立資料庫，並把 database_id 換成實際值
+  //   npx wrangler d1 create edgeblog-db
+  //   npx wrangler d1 execute edgeblog-db --remote --file=schema.sql
+  //   npx wrangler d1 execute edgeblog-db --remote --file=seed.sql
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "edgeblog-db",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+
+  // R2：部署前先建立 bucket
+  //   npx wrangler r2 bucket create edgeblog-files
+  "r2_buckets": [
+    {
+      "binding": "BUCKET",
+      "bucket_name": "edgeblog-files"
+    }
+  ],
+
+  // 前端是純靜態檔案；/api/* 先交給 Worker，其餘由 Assets 提供。
+  // 找不到的無副檔名路徑由 Worker 回傳 index.html，讓前端路由器處理 /posts/:slug；
+  // 缺少的靜態檔（例如 missing.png）則維持 404。
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"]
+  },
+
+  "observability": {
+    "enabled": true
+  }
+}

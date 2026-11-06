@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" content="#f6f2ea" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#14130f" media="(prefers-color-scheme: dark)" />
+    <meta
+      name="description"
+      content="邊緣筆記：一個用 Cloudflare Workers、D1 與 R2 打造的部落格、留言板與檔案下載網站。"
+    />
+    <meta name="referrer" content="strict-origin-when-cross-origin" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'"
+    />
+    <title>邊緣筆記 · Edge Notes</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳到主要內容</a>
+
+    <header class="site-header">
+      <div class="wrap header-inner">
+        <a class="brand" href="/" data-link>
+          <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+            <rect x="2" y="2" width="28" height="28" rx="9" fill="currentColor" />
+            <path
+              d="M10 11h12M10 16h9M10 21h6"
+              stroke="var(--brand-ink)"
+              stroke-width="2.4"
+              stroke-linecap="round"
+            />
+          </svg>
+          <span class="brand-text">
+            <strong>邊緣筆記</strong>
+            <small>Edge Notes</small>
+          </span>
+        </a>
+
+        <nav class="site-nav" aria-label="主要導覽">
+          <a href="/" data-nav="/" data-link>文章</a>
+          <a href="/files" data-nav="/files" data-link>檔案下載</a>
+          <a href="/about" data-nav="/about" data-link>關於</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main" class="wrap" tabindex="-1">
+      <div class="loading">
+        <span class="spinner" aria-hidden="true"></span>
+        載入中…
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap footer-inner">
+        <p>邊緣筆記 · 用 Cloudflare Workers、D1 與 R2 打造</p>
+        <p class="footer-meta">
+          <a href="https://developers.cloudflare.com/workers/" target="_blank" rel="noreferrer noopener"
+            >Cloudflare Workers 文件</a
+          >
+        </p>
+      </div>
+    </footer>
+
+    <noscript>
+      <p class="noscript">這個網站需要 JavaScript 才能載入文章與留言。</p>
+    </noscript>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
