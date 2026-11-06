@@ -1,9 +1,49 @@
-const app = document.getElementById('main');
-const navLinks = [...document.querySelectorAll('.site-nav a[data-nav]')];
+const state = {
+  notes: [],
+  q: '',
+  filter: 'all',
+  color: 'all',
+  editing: null,
+  selectedColor: 'sand',
+  busy: false,
+  seq: 0,
+};
 
-let viewToken = 0;
+const region = document.getElementById('notes-region');
+const grid = document.getElementById('notes-grid');
+const loading = document.getElementById('loading');
+const empty = document.getElementById('empty');
+const emptyTitle = document.getElementById('empty-title');
+const emptyText = document.getElementById('empty-text');
+const emptyAction = document.getElementById('empty-action');
+const statsEl = document.getElementById('stats');
+
+const searchInput = document.getElementById('search');
+const clearSearch = document.getElementById('clear-search');
+const chips = [...document.querySelectorAll('[data-filter]')];
+const colorDots = [...document.querySelectorAll('.color-filter [data-color]')];
+const newButtons = [...document.querySelectorAll('[data-action="new"]')];
+
+const dialog = document.getElementById('note-dialog');
+const form = document.getElementById('note-form');
+const dialogTitle = document.getElementById('dialog-title');
+const titleInput = document.getElementById('note-title');
+const contentInput = document.getElementById('note-content');
+const pinnedInput = document.getElementById('note-pinned');
+const colorButtons = [...document.querySelectorAll('.color-picker [data-color]')];
+const counter = document.getElementById('note-counter');
+const editorError = document.getElementById('editor-error');
+const saveButton = document.getElementById('note-save');
+const deleteButton = document.getElementById('note-delete');
+const dialogFoot = document.getElementById('dialog-foot');
+const deleteConfirm = document.getElementById('delete-confirm');
+const deleteCancel = document.getElementById('delete-cancel');
+const deleteConfirmButton = document.getElementById('delete-confirm-button');
+const toastEl = document.getElementById('toast');
 
 // ---------- 小工具 ----------
+
+const NS = 'http://www.w3.org/2000/svg';
 
 function el(tag, props = {}, ...children) {
   const node = document.createElement(tag);
@@ -27,6 +67,23 @@ function el(tag, props = {}, ...children) {
   return node;
 }
 
+function svgIcon(pathData) {
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('focusable', 'false');
+  const path = document.createElementNS(NS, 'path');
+  path.setAttribute('d', pathData);
+  svg.append(path);
+  return svg;
+}
+
+function pinIcon() {
+  return svgIcon(
+    'M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z'
+  );
+}
+
 async function api(path, options = {}) {
   const headers = { Accept: 'application/json', ...(options.headers || {}) };
   if (options.body) headers['Content-Type'] = 'application/json';
@@ -36,7 +93,7 @@ async function api(path, options = {}) {
   try {
     payload = await response.json();
   } catch {
-    // 忽略非 JSON 回應，下方會用 HTTP status 產生錯誤
+    // 非 JSON 回應交給下方 status 處理
   }
 
   if (!response.ok) {
@@ -54,558 +111,405 @@ function toDate(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-function formatDate(value) {
-  const date = toDate(value);
-  if (!date) return '—';
-  return new Intl.DateTimeFormat('zh-TW', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  }).format(date);
-}
-
-function formatDateTime(value) {
-  const date = toDate(value);
-  if (!date) return '—';
-  return new Intl.DateTimeFormat('zh-TW', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(date);
-}
-
 function isoDate(value) {
   const date = toDate(value);
   return date ? date.toISOString() : undefined;
 }
 
-function formatSize(bytes) {
-  const size = Number(bytes);
-  if (!Number.isFinite(size) || size < 0) return '—';
-  if (size < 1024) return `${size} B`;
-  const units = ['KB', 'MB', 'GB'];
-  let value = size / 1024;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  return `${value.toFixed(value >= 10 ? 0 : 1)} ${units[unit]}`;
+function formatRelative(value) {
+  const date = toDate(value);
+  if (!date) return '剛剛';
+
+  const diff = Date.now() - date.getTime();
+  if (diff < 60_000) return '剛剛';
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分鐘前`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小時前`;
+  if (diff < 172_800_000) return '昨天';
+  if (diff < 604_800_000) return `${Math.floor(diff / 86_400_000)} 天前`;
+
+  return new Intl.DateTimeFormat('zh-TW', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  }).format(date);
 }
 
-function fileBadge(key) {
-  const base = String(key).split('/').pop() || '';
-  const ext = base.includes('.') ? base.split('.').pop() : '';
-  return (ext || 'FILE').slice(0, 4).toUpperCase();
+let toastTimer;
+
+function toast(message, kind = 'success') {
+  clearTimeout(toastTimer);
+  toastEl.hidden = false;
+  toastEl.textContent = message;
+  toastEl.className = `toast ${kind === 'error' ? 'error' : ''}`;
+
+  requestAnimationFrame(() => toastEl.classList.add('is-visible'));
+
+  toastTimer = setTimeout(() => {
+    toastEl.classList.remove('is-visible');
+    toastTimer = setTimeout(() => {
+      toastEl.hidden = true;
+    }, 250);
+  }, 2800);
 }
 
-function setActiveNav(path) {
-  const key = path.startsWith('/posts/') ? '/' : path;
-  for (const link of navLinks) {
-    if (link.dataset.nav === key) link.setAttribute('aria-current', 'page');
-    else link.removeAttribute('aria-current');
-  }
-}
+// ---------- 列表 ----------
 
-function loadingView() {
-  return el(
-    'div',
-    { class: 'loading' },
-    el('span', { class: 'spinner', 'aria-hidden': 'true' }),
-    '載入中…'
-  );
-}
-
-function errorView(error) {
-  return el(
-    'div',
-    { class: 'view' },
-    el(
-      'div',
-      { class: 'error-panel' },
-      el('h1', {}, '畫面載入失敗'),
-      el('p', {}, error.message || '發生未知的錯誤，請稍後再試。'),
-      el(
-        'button',
-        {
-          class: 'button',
-          type: 'button',
-          onclick: () => render(location.pathname + location.search),
-        },
-        '重新載入'
-      )
-    )
-  );
-}
-
-function notFoundView() {
-  return el(
-    'div',
-    { class: 'view' },
-    el(
-      'div',
-      { class: 'error-panel' },
-      el('h1', {}, '找不到這一頁'),
-      el('p', {}, '網址可能打錯了，或這篇文章已經被移除。'),
-      el('a', { class: 'button', href: '/' }, '回到首頁')
-    )
-  );
-}
-
-// ---------- 文章列表 ----------
-
-function postCard(post, featured = false) {
-  const href = `/posts/${encodeURIComponent(post.slug)}`;
-  const comments = Number(post.comment_count) || 0;
+function noteCard(note) {
+  const hasContent = Boolean(note.content);
 
   return el(
     'article',
-    { class: featured ? 'post-card featured' : 'post-card' },
+    {
+      class: `note-card color-${note.color}${note.pinned ? ' is-pinned' : ''}`,
+    },
     el(
-      'p',
-      { class: 'card-meta' },
-      el('time', { datetime: isoDate(post.created_at) }, formatDate(post.created_at)),
-      el('span', { class: 'dot', 'aria-hidden': 'true' }),
-      el('span', {}, comments === 0 ? '還沒有留言' : `${comments} 則留言`)
+      'button',
+      {
+        class: 'pin-toggle',
+        type: 'button',
+        'aria-pressed': note.pinned ? 'true' : 'false',
+        'aria-label': note.pinned ? '取消釘選' : '釘選這則備忘錄',
+        dataset: { id: note.id },
+      },
+      pinIcon()
     ),
-    el('h2', {}, el('a', { href }, post.title)),
-    post.excerpt ? el('p', { class: 'excerpt' }, post.excerpt) : null,
     el(
-      'div',
-      { class: 'card-foot' },
-      el('span', {}, featured ? '編輯精選' : '閱讀全文'),
+      'button',
+      {
+        class: 'note-open',
+        type: 'button',
+        dataset: { id: note.id },
+        'aria-label': `編輯備忘錄：${note.title}`,
+      },
+      el('h2', {}, note.title),
       el(
-        'a',
-        { class: 'read-more', href, 'aria-label': `閱讀：${post.title}` },
-        '繼續閱讀',
-        el('span', { 'aria-hidden': 'true' }, '→')
+        'p',
+        { class: hasContent ? 'note-preview' : 'note-preview is-empty' },
+        hasContent ? note.content : '沒有內容'
+      ),
+      el(
+        'footer',
+        { class: 'note-foot' },
+        el('time', { datetime: isoDate(note.updated_at) }, formatRelative(note.updated_at)),
+        el('span', { class: 'note-open-hint' }, '編輯')
       )
     )
   );
 }
 
-async function renderHome(token) {
-  document.title = '邊緣筆記 · Edge Notes';
-  const posts = await api('/api/posts?limit=50');
-  if (token !== viewToken) return;
+function updateStats(stats) {
+  statsEl.textContent = `共 ${stats.total} 則備忘錄 · ${stats.pinned} 則釘選`;
+}
 
-  const view = el(
-    'div',
-    { class: 'view' },
-    el(
-      'section',
-      { class: 'hero' },
-      el('p', { class: 'eyebrow' }, 'Cloudflare Workers · D1 · R2'),
-      el('h1', {}, '把想法寫在離讀者', el('em', {}, '最近的節點'), '。'),
-      el(
-        'p',
-        { class: 'lede' },
-        '一個在邊緣運行的部落格：文章與留言存在 D1，檔案放在 R2，前端由全球節點直接快取。沒有主機要維護，只有你想寫的故事。'
-      ),
-      el(
-        'div',
-        { class: 'hero-links' },
-        el('a', { class: 'button', href: '/files' }, '看看可下載的檔案'),
-        el('a', { class: 'button ghost', href: '/about' }, '這個網站怎麼做的')
-      )
-    )
-  );
+function renderNotes() {
+  grid.replaceChildren(...state.notes.map(noteCard));
 
-  if (posts.length === 0) {
-    view.append(
-      el(
-        'div',
-        { class: 'empty' },
-        el('strong', {}, '資料庫裡還沒有文章'),
-        '執行 npm run seed:local 匯入範例文章，或直接寫入 D1。'
-      )
-    );
-    app.replaceChildren(view);
-    app.focus({ preventScroll: true });
+  const hasFilters = Boolean(state.q) || state.filter !== 'all' || state.color !== 'all';
+
+  if (state.notes.length > 0) {
+    grid.hidden = false;
+    empty.hidden = true;
     return;
   }
 
-  const [featured, ...rest] = posts;
-  const grid = el('div', { class: 'post-grid' }, postCard(featured, true), ...rest.map((p) => postCard(p)));
+  grid.hidden = true;
+  empty.hidden = false;
 
-  view.append(
-    el(
-      'section',
-      { 'aria-labelledby': 'latest-heading' },
-      el(
-        'div',
-        { class: 'section-head' },
-        el('h2', { id: 'latest-heading' }, '最新文章'),
-        el('span', { class: 'count' }, `${posts.length} 篇`)
-      ),
-      grid
-    )
-  );
-
-  app.replaceChildren(view);
-  app.focus({ preventScroll: true });
-}
-
-// ---------- 單篇文章與留言 ----------
-
-function commentNode(comment) {
-  return el(
-    'article',
-    { class: 'comment' },
-    el(
-      'header',
-      {},
-      el('strong', {}, comment.author),
-      el('time', { datetime: isoDate(comment.created_at) }, formatDateTime(comment.created_at))
-    ),
-    el('p', {}, comment.body)
-  );
-}
-
-function commentsSection(post, comments) {
-  let count = comments.length;
-
-  const list = el(
-    'div',
-    { class: 'comment-list' },
-    count === 0
-      ? el('div', { class: 'empty' }, el('strong', {}, '還沒有留言'), '成為第一個留言的人吧。')
-      : comments.map(commentNode)
-  );
-
-  const countLabel = el('span', { class: 'count' }, `${count} 則留言`);
-
-  const nameInput = el('input', {
-    id: 'comment-author',
-    name: 'author',
-    type: 'text',
-    maxlength: '30',
-    required: true,
-    autocomplete: 'nickname',
-    placeholder: '你的暱稱',
-  });
-
-  const bodyInput = el('textarea', {
-    id: 'comment-body',
-    name: 'body',
-    maxlength: '500',
-    required: true,
-    rows: '4',
-    placeholder: '寫下你的想法…',
-  });
-
-  const status = el('p', { class: 'form-status', role: 'status', 'aria-live': 'polite' });
-  const submit = el('button', { class: 'button', type: 'submit' }, '送出留言');
-
-  const form = el(
-    'form',
-    { class: 'comment-form' },
-    el('h3', {}, '留下你的想法'),
-    el(
-      'div',
-      { class: 'field' },
-      el('label', { for: 'comment-author' }, '暱稱'),
-      nameInput
-    ),
-    el(
-      'div',
-      { class: 'field' },
-      el('label', { for: 'comment-body' }, '留言'),
-      bodyInput
-    ),
-    el(
-      'div',
-      { class: 'form-row' },
-      status,
-      submit
-    )
-  );
-
-  form.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    submit.disabled = true;
-    status.className = 'form-status';
-    status.textContent = '送出中…';
-
-    try {
-      const created = await api(`/api/posts/${encodeURIComponent(post.slug)}/comments`, {
-        method: 'POST',
-        body: JSON.stringify({ author: nameInput.value, body: bodyInput.value }),
-      });
-
-      const empty = list.querySelector('.empty');
-      if (empty) empty.remove();
-      list.append(commentNode(created));
-
-      count += 1;
-      countLabel.textContent = `${count} 則留言`;
-      bodyInput.value = '';
-      status.className = 'form-status success';
-      status.textContent = '留言已送出，謝謝你！';
-    } catch (error) {
-      status.className = 'form-status error';
-      status.textContent = error.message || '送出失敗，請稍後再試。';
-    } finally {
-      submit.disabled = false;
-    }
-  });
-
-  return el(
-    'section',
-    { class: 'comments', 'aria-labelledby': 'comments-heading' },
-    el(
-      'div',
-      { class: 'section-head' },
-      el('h2', { id: 'comments-heading' }, '留言'),
-      countLabel
-    ),
-    list,
-    form
-  );
-}
-
-function bodyNodes(body) {
-  return String(body || '')
-    .split(/\n{2,}/)
-    .map((paragraph) => paragraph.trim())
-    .filter(Boolean)
-    .map((paragraph) => el('p', {}, paragraph));
-}
-
-async function renderPost(token, slug) {
-  const encoded = encodeURIComponent(slug);
-  const [post, comments] = await Promise.all([
-    api(`/api/posts/${encoded}`),
-    api(`/api/posts/${encoded}/comments`),
-  ]);
-  if (token !== viewToken) return;
-
-  document.title = `${post.title} · 邊緣筆記`;
-
-  const view = el(
-    'div',
-    { class: 'view' },
-    el('a', { class: 'back-link', href: '/' }, '← 回文章列表'),
-    el(
-      'article',
-      { class: 'article' },
-      el(
-        'header',
-        { class: 'article-header' },
-        el(
-          'p',
-          { class: 'article-meta' },
-          el('time', { datetime: isoDate(post.created_at) }, formatDate(post.created_at)),
-          el('span', { class: 'dot', 'aria-hidden': 'true' }),
-          el('span', {}, comments.length === 0 ? '還沒有留言' : `${comments.length} 則留言`)
-        ),
-        el('h1', {}, post.title),
-        post.excerpt ? el('p', { class: 'article-excerpt' }, post.excerpt) : null
-      ),
-      el('div', { class: 'article-body' }, bodyNodes(post.body))
-    ),
-    commentsSection(post, comments)
-  );
-
-  app.replaceChildren(view);
-  app.focus({ preventScroll: true });
-}
-
-// ---------- 檔案下載 ----------
-
-function fileRow(file) {
-  const href = `/api/files/${encodeURIComponent(file.key)}`;
-  const name = String(file.key).split('/').pop() || file.key;
-
-  return el(
-    'li',
-    { class: 'file-row' },
-    el('span', { class: 'file-badge', 'aria-hidden': 'true' }, fileBadge(file.key)),
-    el(
-      'div',
-      { class: 'file-info' },
-      el('strong', { title: file.key }, name),
-      el('span', {}, `${formatSize(file.size)} · 上傳於 ${formatDate(file.uploaded)}`)
-    ),
-    el('a', { class: 'button small ghost', href, download: name }, '下載')
-  );
-}
-
-async function renderFiles(token) {
-  document.title = '檔案下載 · 邊緣筆記';
-  const files = await api('/api/files');
-  if (token !== viewToken) return;
-
-  const view = el(
-    'div',
-    { class: 'view' },
-    el(
-      'header',
-      { class: 'files-intro' },
-      el('p', { class: 'eyebrow' }, 'R2 Object Storage'),
-      el('h1', {}, '檔案下載'),
-      el(
-        'p',
-        { class: 'lede' },
-        '這裡的檔案放在 Cloudflare R2，透過 Worker 串流下載。大型檔案也支援 HTTP Range，瀏覽器可以續傳。'
-      )
-    )
-  );
-
-  if (files.length === 0) {
-    view.append(
-      el(
-        'div',
-        { class: 'empty' },
-        el('strong', {}, '目前沒有檔案'),
-        '用 wrangler r2 object put 上傳檔案後，重新整理即可看到。'
-      )
-    );
+  if (hasFilters) {
+    emptyTitle.textContent = '找不到符合的備忘錄';
+    emptyText.textContent = '試試其他關鍵字，或清除篩選條件再看一次。';
+    emptyAction.textContent = '清除篩選';
+    emptyAction.dataset.action = 'clear';
   } else {
-    view.append(
-      el(
-        'div',
-        { class: 'section-head' },
-        el('h2', {}, '全部檔案'),
-        el('span', { class: 'count' }, `${files.length} 個`)
-      ),
-      el('ul', { class: 'file-list' }, files.map(fileRow))
-    );
+    emptyTitle.textContent = '還沒有任何備忘錄';
+    emptyText.textContent = '把第一個想法寫下來，它會出現在這裡。';
+    emptyAction.textContent = '新增備忘錄';
+    emptyAction.dataset.action = 'new';
   }
-
-  app.replaceChildren(view);
-  app.focus({ preventScroll: true });
 }
 
-// ---------- 關於 ----------
-
-async function renderAbout(token) {
-  document.title = '關於 · 邊緣筆記';
-  if (token !== viewToken) return;
-
-  const view = el(
-    'div',
-    { class: 'view' },
-    el(
-      'article',
-      { class: 'about' },
-      el('p', { class: 'eyebrow' }, 'About this site'),
-      el('h1', {}, '一個最小的全端邊緣網站'),
-      el(
-        'p',
-        {},
-        '邊緣筆記是為了練習 Cloudflare 開發者平台而做的專案。它把書中的三合一網站——部落格、留言板、檔案下載——壓縮成一個自包含的 Worker 專案：clone、安裝、建表、部署，四個步驟就能上線。'
-      ),
-      el('h2', {}, '技術堆疊'),
-      el(
-        'ul',
-        {},
-        el('li', {}, el('strong', {}, 'Cloudflare Workers'), '：處理 /api/* 請求和 SPA 回退，使用 V8 Isolate，冷啟動極低。'),
-        el('li', {}, el('strong', {}, 'D1'), '：儲存文章與留言，用參數化 SQL 查詢，資料表有 CHECK 約束作為最後防線。'),
-        el('li', {}, el('strong', {}, 'R2'), '：儲存可下載檔案，Worker 以串流回應，支援 Range 續傳。'),
-        el('li', {}, el('strong', {}, 'Static Assets'), '：HTML、CSS、JavaScript 由邊緣直接快取，不經過 Worker。')
-      ),
-      el('h2', {}, 'API'),
-      el(
-        'pre',
-        { class: 'code-block' },
-        'GET  /api/posts\n' +
-          'GET  /api/posts/:slug\n' +
-          'GET  /api/posts/:slug/comments\n' +
-          'POST /api/posts/:slug/comments\n' +
-          'GET  /api/files\n' +
-          'GET  /api/files/:key\n' +
-          'GET  /api/health'
-      ),
-      el('h2', {}, '設計取捨'),
-      el(
-        'p',
-        {},
-        '這個專案刻意保持小：沒有會員系統、沒有後台編輯器、沒有圖片上傳。文章用 SQL 寫入，留言用暱稱辨識，檔案用 wrangler 上傳。把範圍縮小，才能把每一個環節講清楚。'
-      ),
-      el(
-        'p',
-        {},
-        '安全上，前端只用 textContent 輸出內容以避免 XSS；後端驗證長度與型別、使用 D1 參數化查詢、下載時限制 key 格式。免費方案若要公開上線，建議再加上 Turnstile 與 Rate Limiting 規則。'
-      ),
-      el(
-        'div',
-        { class: 'fact-grid' },
-        el('div', { class: 'fact' }, el('span', {}, 'Runtime'), el('strong', {}, 'Workers')),
-        el('div', { class: 'fact' }, el('span', {}, 'Database'), el('strong', {}, 'D1 · SQLite')),
-        el('div', { class: 'fact' }, el('span', {}, 'Storage'), el('strong', {}, 'R2 · Stream'))
-      )
-    )
-  );
-
-  app.replaceChildren(view);
-  app.focus({ preventScroll: true });
+function showLoadError(error) {
+  grid.hidden = true;
+  empty.hidden = false;
+  emptyTitle.textContent = '載入失敗';
+  emptyText.textContent = error.message || '請稍後再試一次。';
+  emptyAction.textContent = '重新載入';
+  emptyAction.dataset.action = 'reload';
+  statsEl.textContent = '無法載入備忘錄';
 }
 
-// ---------- 路由 ----------
+async function refresh() {
+  const seq = ++state.seq;
+  region.setAttribute('aria-busy', 'true');
 
-async function render(path) {
-  const token = ++viewToken;
-  setActiveNav(new URL(path, location.origin).pathname);
-  app.replaceChildren(loadingView());
+  const params = new URLSearchParams();
+  if (state.q) params.set('q', state.q);
+  if (state.filter === 'pinned') params.set('pinned', '1');
+  if (state.color !== 'all') params.set('color', state.color);
+  params.set('limit', '500');
 
   try {
-    const url = new URL(path, location.origin);
-    const pathname = url.pathname;
+    const [notes, stats] = await Promise.all([
+      api(`/api/notes?${params.toString()}`),
+      api('/api/stats'),
+    ]);
 
-    if (pathname === '/') return await renderHome(token);
-    if (pathname === '/files') return await renderFiles(token);
-    if (pathname === '/about') return await renderAbout(token);
+    if (seq !== state.seq) return;
 
-    const match = pathname.match(/^\/posts\/([^/]+)$/);
-    if (match) {
-      return await renderPost(token, decodeURIComponent(match[1]));
-    }
-
-    if (token === viewToken) {
-      document.title = '找不到頁面 · 邊緣筆記';
-      app.replaceChildren(notFoundView());
-    }
+    state.notes = notes;
+    updateStats(stats);
+    renderNotes();
   } catch (error) {
-    if (token !== viewToken) return;
-    document.title = '發生錯誤 · 邊緣筆記';
-    app.replaceChildren(errorView(error));
+    if (seq !== state.seq) return;
+    showLoadError(error);
+    toast(error.message, 'error');
+  } finally {
+    if (seq === state.seq) {
+      loading.hidden = true;
+      region.setAttribute('aria-busy', 'false');
+    }
   }
 }
 
-function navigate(path, { replace = false } = {}) {
-  if (replace) history.replaceState(null, '', path);
-  else history.pushState(null, '', path);
+function resetFilters() {
+  state.q = '';
+  state.filter = 'all';
+  state.color = 'all';
+  searchInput.value = '';
+  clearSearch.hidden = true;
 
-  window.scrollTo(0, 0);
-  render(path);
+  for (const chip of chips) chip.classList.toggle('is-active', chip.dataset.filter === 'all');
+  for (const dot of colorDots) dot.classList.toggle('is-active', dot.dataset.color === 'all');
+
+  refresh();
 }
 
-document.addEventListener('click', (event) => {
-  if (event.defaultPrevented || event.button !== 0) return;
-  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+// ---------- 編輯器 ----------
 
-  const anchor = event.target.closest('a');
-  if (!anchor) return;
-  if (anchor.target && anchor.target !== '_self') return;
-  if (anchor.hasAttribute('download')) return;
+function updateColorPicker() {
+  for (const button of colorButtons) {
+    const active = button.dataset.color === state.selectedColor;
+    button.classList.toggle('is-active', active);
+    button.setAttribute('aria-pressed', String(active));
+  }
+}
 
-  const href = anchor.getAttribute('href');
-  if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:')) return;
+function updateCounter() {
+  counter.textContent = `${contentInput.value.length} / 20000`;
+}
 
-  const url = new URL(anchor.href, location.href);
-  if (url.origin !== location.origin) return;
-  if (url.pathname.startsWith('/api/')) return;
+function openEditor(note) {
+  state.editing = note;
+  state.selectedColor = note ? note.color : 'sand';
+  state.busy = false;
 
+  dialogTitle.textContent = note ? '編輯備忘錄' : '新增備忘錄';
+  titleInput.value = note ? note.title : '';
+  contentInput.value = note ? note.content : '';
+  pinnedInput.checked = note ? Boolean(note.pinned) : false;
+  deleteButton.hidden = !note;
+  dialogFoot.hidden = false;
+  deleteConfirm.hidden = true;
+  editorError.textContent = '';
+
+  updateColorPicker();
+  updateCounter();
+
+  if (!dialog.open) dialog.showModal();
+  requestAnimationFrame(() => titleInput.focus());
+}
+
+// ---------- 事件 ----------
+
+let searchTimer;
+
+searchInput.addEventListener('input', () => {
+  state.q = searchInput.value.trim();
+  clearSearch.hidden = searchInput.value.length === 0;
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(refresh, 260);
+});
+
+clearSearch.addEventListener('click', () => {
+  searchInput.value = '';
+  state.q = '';
+  clearSearch.hidden = true;
+  searchInput.focus();
+  refresh();
+});
+
+for (const chip of chips) {
+  chip.addEventListener('click', () => {
+    state.filter = chip.dataset.filter;
+    for (const item of chips) item.classList.toggle('is-active', item === chip);
+    refresh();
+  });
+}
+
+for (const dot of colorDots) {
+  dot.addEventListener('click', () => {
+    state.color = dot.dataset.color;
+    for (const item of colorDots) item.classList.toggle('is-active', item === dot);
+    refresh();
+  });
+}
+
+for (const button of newButtons) {
+  button.addEventListener('click', () => openEditor(null));
+}
+
+emptyAction.addEventListener('click', () => {
+  const action = emptyAction.dataset.action;
+  if (action === 'clear') resetFilters();
+  else if (action === 'reload') refresh();
+  else openEditor(null);
+});
+
+grid.addEventListener('click', (event) => {
+  const pinButton = event.target.closest('.pin-toggle');
+  if (pinButton) {
+    event.preventDefault();
+    togglePin(Number(pinButton.dataset.id));
+    return;
+  }
+
+  const openButton = event.target.closest('.note-open');
+  if (openButton) {
+    const note = state.notes.find((item) => item.id === Number(openButton.dataset.id));
+    if (note) openEditor(note);
+  }
+});
+
+async function togglePin(id) {
+  const note = state.notes.find((item) => item.id === id);
+  if (!note) return;
+
+  try {
+    await api(`/api/notes/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ pinned: !note.pinned }),
+    });
+    toast(note.pinned ? '已取消釘選' : '已釘選備忘錄');
+    await refresh();
+  } catch (error) {
+    toast(error.message, 'error');
+  }
+}
+
+for (const button of colorButtons) {
+  button.addEventListener('click', () => {
+    state.selectedColor = button.dataset.color;
+    updateColorPicker();
+  });
+}
+
+contentInput.addEventListener('input', updateCounter);
+
+for (const button of document.querySelectorAll('#note-dialog [data-close]')) {
+  button.addEventListener('click', () => dialog.close());
+}
+
+dialog.addEventListener('click', (event) => {
+  if (event.target === dialog) dialog.close();
+});
+
+dialog.addEventListener('close', () => {
+  state.editing = null;
+  state.busy = false;
+  dialogFoot.hidden = false;
+  deleteConfirm.hidden = true;
+  editorError.textContent = '';
+});
+
+deleteButton.addEventListener('click', () => {
+  if (!state.editing) return;
+  dialogFoot.hidden = true;
+  deleteConfirm.hidden = false;
+  deleteConfirmButton.focus();
+});
+
+deleteCancel.addEventListener('click', () => {
+  deleteConfirm.hidden = true;
+  dialogFoot.hidden = false;
+  deleteButton.focus();
+});
+
+deleteConfirmButton.addEventListener('click', async () => {
+  if (!state.editing) return;
+
+  const id = state.editing.id;
+  deleteConfirmButton.disabled = true;
+
+  try {
+    await api(`/api/notes/${id}`, { method: 'DELETE' });
+    dialog.close();
+    toast('備忘錄已刪除');
+    await refresh();
+  } catch (error) {
+    toast(error.message, 'error');
+  } finally {
+    deleteConfirmButton.disabled = false;
+  }
+});
+
+form.addEventListener('submit', async (event) => {
   event.preventDefault();
-  navigate(url.pathname + url.search + url.hash);
+  if (state.busy) return;
+
+  const title = titleInput.value.trim();
+  const content = contentInput.value.trim();
+
+  if (!title && !content) {
+    editorError.textContent = '請輸入標題或內容';
+    titleInput.focus();
+    return;
+  }
+
+  const isEditing = Boolean(state.editing);
+  const editingId = state.editing ? state.editing.id : null;
+
+  state.busy = true;
+  saveButton.disabled = true;
+  saveButton.textContent = '儲存中…';
+  editorError.textContent = '';
+
+  try {
+    const payload = {
+      title: titleInput.value,
+      content: contentInput.value,
+      color: state.selectedColor,
+      pinned: pinnedInput.checked,
+    };
+
+    if (isEditing) {
+      await api(`/api/notes/${editingId}`, {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      });
+    } else {
+      await api('/api/notes', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
+    }
+
+    dialog.close();
+    toast(isEditing ? '備忘錄已更新' : '備忘錄已新增');
+    await refresh();
+  } catch (error) {
+    editorError.textContent = error.message || '儲存失敗，請稍後再試。';
+  } finally {
+    state.busy = false;
+    saveButton.disabled = false;
+    saveButton.textContent = '儲存';
+  }
 });
 
-window.addEventListener('popstate', () => {
-  render(location.pathname + location.search);
+document.addEventListener('keydown', (event) => {
+  if ((event.ctrlKey || event.metaKey) && event.key === 'Enter' && dialog.open) {
+    event.preventDefault();
+    form.requestSubmit();
+  }
 });
 
-render(location.pathname + location.search);
+refresh();

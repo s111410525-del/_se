@@ -1,17 +1,23 @@
-// edgeblog — Cloudflare Worker
+// EdgeMemo — Cloudflare Worker
 //
-//   /api/posts                 文章列表（D1）
-//   /api/posts/:slug           單篇文章（D1）
-//   /api/posts/:slug/comments  留言列表 / 新增留言（D1）
-//   /api/files                 R2 檔案列表
-//   /api/files/:key            R2 檔案下載（支援 Range）
-//   其他                       靜態資產（public/），SPA 由前端路由處理
+//   GET    /api/notes           備忘錄列表（支援 q / color / pinned / limit）
+//   POST   /api/notes           新增備忘錄
+//   GET    /api/notes/:id       單則備忘錄
+//   PATCH  /api/notes/:id       更新備忘錄
+//   DELETE /api/notes/:id       刪除備忘錄
+//   GET    /api/stats           總數與釘選數
+//   GET    /api/health          健康檢查
+//   其他                        靜態資產（public/），無副檔名路徑回傳 index.html
 
 const JSON_HEADERS = {
   'Content-Type': 'application/json; charset=utf-8',
   'Cache-Control': 'no-store',
   'X-Content-Type-Options': 'nosniff',
 };
+
+const COLORS = new Set(['sand', 'rose', 'mint', 'sky', 'lilac', 'sun']);
+const TITLE_MAX = 120;
+const CONTENT_MAX = 20000;
 
 const json = (payload, status = 200) =>
   new Response(JSON.stringify(payload), { status, headers: JSON_HEADERS });
@@ -26,232 +32,201 @@ class HttpError extends Error {
   }
 }
 
-function decodeParam(value) {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    throw new HttpError(400, '網址格式不正確');
-  }
-}
-
-function validSlug(slug) {
-  if (!/^[a-z0-9][a-z0-9-]{0,79}$/.test(slug)) {
-    throw new HttpError(404, '找不到這篇文章');
-  }
-  return slug;
+function requireDB(env) {
+  if (!env.DB) throw new HttpError(500, '伺服器缺少 D1 綁定 DB');
+  return env.DB;
 }
 
 async function readJson(request) {
-  const type = request.headers.get('content-type') || '';
-  if (!type.toLowerCase().includes('application/json')) {
+  const type = (request.headers.get('content-type') || '').toLowerCase();
+  if (!type.includes('application/json')) {
     throw new HttpError(415, '請以 application/json 格式送出');
   }
+
   let body;
   try {
     body = await request.json();
   } catch {
     throw new HttpError(400, 'JSON 格式不正確');
   }
+
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     throw new HttpError(400, '請提供物件格式的內容');
   }
+
   return body;
 }
 
-function requireDB(env) {
-  if (!env.DB) throw new HttpError(500, '伺服器缺少 D1 綁定 DB');
-  return env.DB;
+function parseId(value) {
+  if (!/^\d{1,12}$/.test(value)) throw new HttpError(404, '找不到這則備忘錄');
+  return Number(value);
 }
 
-function requireBucket(env) {
-  if (!env.BUCKET) throw new HttpError(500, '伺服器缺少 R2 綁定 BUCKET');
-  return env.BUCKET;
+function hasKey(object, key) {
+  return Object.prototype.hasOwnProperty.call(object, key);
 }
 
-// ---------- 文章 ----------
+function toPinned(value) {
+  if (value === true || value === 1 || value === '1') return 1;
+  if (value === false || value === 0 || value === '0' || value == null) return 0;
+  throw new HttpError(400, '釘選狀態不正確');
+}
 
-async function listPosts(env, url) {
-  const db = requireDB(env);
-  const requested = Number(url.searchParams.get('limit'));
-  const limit = Number.isFinite(requested) ? Math.min(Math.max(Math.trunc(requested), 1), 50) : 20;
+function toColor(value) {
+  const color = String(value ?? '');
+  if (!COLORS.has(color)) throw new HttpError(400, '顏色選項不正確');
+  return color;
+}
 
-  const { results } = await db
+function deriveTitle(content) {
+  const firstLine = content
+    .split('\n')
+    .map((line) => line.trim())
+    .find(Boolean);
+  return (firstLine || '未命名備忘錄').slice(0, TITLE_MAX);
+}
+
+function normalizeNote(input, existing = null) {
+  let title = existing ? existing.title : '';
+  let content = existing ? existing.content : '';
+
+  if (hasKey(input, 'title')) title = String(input.title ?? '');
+  if (hasKey(input, 'content')) content = String(input.content ?? '');
+
+  title = title.replace(/\r\n?/g, '\n').trim();
+  content = content.replace(/\r\n?/g, '\n').trim();
+
+  if (!title && content) title = deriveTitle(content);
+  if (!title && !content) throw new HttpError(400, '請輸入標題或內容');
+  if (title.length > TITLE_MAX) throw new HttpError(400, `標題最多 ${TITLE_MAX} 個字`);
+  if (content.length > CONTENT_MAX) throw new HttpError(400, `內容最多 ${CONTENT_MAX} 個字`);
+
+  const color = hasKey(input, 'color')
+    ? toColor(input.color)
+    : existing
+      ? existing.color
+      : 'sand';
+
+  const pinned = hasKey(input, 'pinned')
+    ? toPinned(input.pinned)
+    : existing
+      ? existing.pinned
+      : 0;
+
+  return { title, content, color, pinned };
+}
+
+function escapeLike(value) {
+  return value.replace(/[\\%_]/g, (char) => `\\${char}`);
+}
+
+// ---------- 查詢 ----------
+
+async function findNote(db, id) {
+  const note = await db
     .prepare(
-      `SELECT p.id, p.slug, p.title, p.excerpt, p.created_at,
-              (SELECT COUNT(*) FROM comments c
-                WHERE c.post_id = p.id AND c.status = 'visible') AS comment_count
-         FROM posts p
-        WHERE p.status = 'published'
-        ORDER BY datetime(p.created_at) DESC, p.id DESC
-        LIMIT ?`
+      `SELECT id, title, content, color, pinned, created_at, updated_at
+         FROM notes WHERE id = ?`
     )
-    .bind(limit)
-    .all();
+    .bind(id)
+    .first();
+  if (!note) throw new HttpError(404, '找不到這則備忘錄');
+  return note;
+}
 
+async function listNotes(env, url) {
+  const db = requireDB(env);
+
+  const q = (url.searchParams.get('q') || '').trim();
+  if (q.length > 100) throw new HttpError(400, '搜尋關鍵字最多 100 個字');
+
+  const colorParam = url.searchParams.get('color');
+  const color = colorParam && colorParam !== 'all' ? toColor(colorParam) : null;
+  const pinnedOnly = url.searchParams.get('pinned') === '1';
+
+  const limitParam = url.searchParams.get('limit');
+  const requested = limitParam === null || limitParam === '' ? NaN : Number(limitParam);
+  const limit = Number.isFinite(requested)
+    ? Math.min(Math.max(Math.trunc(requested), 1), 500)
+    : 200;
+
+  const where = [];
+  const bind = [];
+
+  if (q) {
+    const like = `%${escapeLike(q)}%`;
+    where.push("(title LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\')");
+    bind.push(like, like);
+  }
+  if (color) {
+    where.push('color = ?');
+    bind.push(color);
+  }
+  if (pinnedOnly) {
+    where.push('pinned = 1');
+  }
+
+  const sql = `SELECT id, title, content, color, pinned, created_at, updated_at
+                 FROM notes
+                ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+                ORDER BY pinned DESC, datetime(updated_at) DESC, id DESC
+                LIMIT ?`;
+
+  const { results } = await db.prepare(sql).bind(...bind, limit).all();
   return ok(results);
 }
 
-async function getPost(env, slug) {
+async function getStats(env) {
   const db = requireDB(env);
-  const post = await db
-    .prepare(
-      `SELECT p.id, p.slug, p.title, p.excerpt, p.body, p.created_at,
-              (SELECT COUNT(*) FROM comments c
-                WHERE c.post_id = p.id AND c.status = 'visible') AS comment_count
-         FROM posts p
-        WHERE p.slug = ? AND p.status = 'published'`
-    )
-    .bind(slug)
+  const row = await db
+    .prepare('SELECT COUNT(*) AS total, COALESCE(SUM(pinned), 0) AS pinned FROM notes')
     .first();
-
-  if (!post) throw new HttpError(404, '找不到這篇文章');
-  return ok(post);
+  return ok({ total: row.total, pinned: row.pinned });
 }
 
-// ---------- 留言 ----------
+// ---------- 寫入 ----------
 
-async function findPostId(env, slug) {
+async function createNote(request, env) {
   const db = requireDB(env);
-  const post = await db
-    .prepare("SELECT id FROM posts WHERE slug = ? AND status = 'published'")
-    .bind(slug)
-    .first();
-  if (!post) throw new HttpError(404, '找不到這篇文章');
-  return post.id;
-}
-
-async function listComments(env, slug) {
-  const db = requireDB(env);
-  const postId = await findPostId(env, slug);
-  const { results } = await db
-    .prepare(
-      `SELECT id, author, body, created_at
-         FROM comments
-        WHERE post_id = ? AND status = 'visible'
-        ORDER BY id ASC`
-    )
-    .bind(postId)
-    .all();
-  return ok(results);
-}
-
-async function createComment(request, env, slug) {
-  const db = requireDB(env);
-  const postId = await findPostId(env, slug);
   const input = await readJson(request);
-
-  const author = String(input.author ?? '').replace(/\s+/g, ' ').trim();
-  const body = String(input.body ?? '').replace(/\r\n?/g, '\n').trim();
-
-  if (!author) throw new HttpError(400, '請留下暱稱');
-  if (author.length > 30) throw new HttpError(400, '暱稱最多 30 個字');
-  if (!body) throw new HttpError(400, '留言不能是空的');
-  if (body.length > 500) throw new HttpError(400, '留言最多 500 個字');
+  const note = normalizeNote(input);
 
   const result = await db
-    .prepare('INSERT INTO comments (post_id, author, body) VALUES (?, ?, ?)')
-    .bind(postId, author, body)
+    .prepare(
+      `INSERT INTO notes (title, content, color, pinned, created_at, updated_at)
+       VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`
+    )
+    .bind(note.title, note.content, note.color, note.pinned)
     .run();
 
-  const comment = await db
-    .prepare('SELECT id, author, body, created_at FROM comments WHERE id = ?')
-    .bind(result.meta.last_row_id)
-    .first();
-
-  return ok(comment, 201);
+  const created = await findNote(db, result.meta.last_row_id);
+  return ok(created, 201);
 }
 
-// ---------- 檔案（R2）----------
+async function updateNote(request, env, id) {
+  const db = requireDB(env);
+  const existing = await findNote(db, id);
+  const input = await readJson(request);
+  const note = normalizeNote(input, existing);
 
-async function listFiles(env) {
-  const bucket = requireBucket(env);
-  const files = [];
-  let cursor;
+  await db
+    .prepare(
+      `UPDATE notes
+          SET title = ?, content = ?, color = ?, pinned = ?, updated_at = datetime('now')
+        WHERE id = ?`
+    )
+    .bind(note.title, note.content, note.color, note.pinned, id)
+    .run();
 
-  do {
-    const page = await bucket.list({ limit: 1000, cursor });
-    for (const object of page.objects) {
-      files.push({
-        key: object.key,
-        size: object.size,
-        uploaded: object.uploaded instanceof Date ? object.uploaded.toISOString() : null,
-      });
-    }
-    cursor = page.truncated ? page.cursor : undefined;
-  } while (cursor);
-
-  files.sort((a, b) => {
-    const byDate = String(b.uploaded || '').localeCompare(String(a.uploaded || ''));
-    return byDate || a.key.localeCompare(b.key);
-  });
-
-  return ok(files);
+  const updated = await findNote(db, id);
+  return ok(updated);
 }
 
-const CONTENT_TYPES = {
-  md: 'text/markdown; charset=utf-8',
-  txt: 'text/plain; charset=utf-8',
-  csv: 'text/csv; charset=utf-8',
-  json: 'application/json; charset=utf-8',
-  html: 'text/html; charset=utf-8',
-  pdf: 'application/pdf',
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  webp: 'image/webp',
-  svg: 'image/svg+xml',
-  zip: 'application/zip',
-};
-
-function guessType(key) {
-  const ext = key.split('.').pop().toLowerCase();
-  return CONTENT_TYPES[ext] || 'application/octet-stream';
-}
-
-function contentDisposition(key) {
-  const name = key.split('/').pop() || 'download';
-  const fallback = name
-    .replace(/[^\x20-\x7e]/g, '_')
-    .replace(/["\\\r\n]/g, '_');
-  return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(name)}`;
-}
-
-async function downloadFile(request, env, key) {
-  const bucket = requireBucket(env);
-
-  if (!key || key.length > 512 || key.startsWith('/') || key.includes('\0')) {
-    throw new HttpError(400, '檔案名稱不正確');
-  }
-
-  const range = request.headers.get('Range');
-  const object = await bucket.get(key, range ? { range: request.headers } : undefined);
-  if (!object) throw new HttpError(404, '找不到這個檔案');
-
-  const headers = new Headers();
-  if (typeof object.writeHttpMetadata === 'function') object.writeHttpMetadata(headers);
-
-  if (!headers.get('Content-Type')) headers.set('Content-Type', guessType(key));
-  headers.set('Accept-Ranges', 'bytes');
-  headers.set('Cache-Control', 'public, max-age=300');
-  headers.set('X-Content-Type-Options', 'nosniff');
-  headers.set('Content-Disposition', contentDisposition(key));
-  if (object.httpEtag) headers.set('ETag', object.httpEtag);
-
-  let status = 200;
-  if (range && object.range) {
-    const { offset, length } = object.range;
-    const end = offset + length - 1;
-    headers.set('Content-Range', `bytes ${offset}-${end}/${object.size}`);
-    headers.set('Content-Length', String(length));
-    status = 206;
-  } else {
-    headers.set('Content-Type', headers.get('Content-Type') || guessType(key));
-    headers.set('Content-Length', String(object.size));
-  }
-
-  const body = request.method === 'HEAD' ? null : object.body;
-  return new Response(body, { status, headers });
+async function deleteNote(env, id) {
+  const db = requireDB(env);
+  const result = await db.prepare('DELETE FROM notes WHERE id = ?').bind(id).run();
+  if (!result.meta.changes) throw new HttpError(404, '找不到這則備忘錄');
+  return ok({ id });
 }
 
 // ---------- 路由 ----------
@@ -266,38 +241,29 @@ async function handleApi(request, env) {
       if (method !== 'GET') throw new HttpError(405, '這個方法不被允許');
       return ok({
         ok: true,
-        bindings: { db: Boolean(env.DB), bucket: Boolean(env.BUCKET) },
+        binding: Boolean(env.DB),
         time: new Date().toISOString(),
       });
     }
 
-    if (path === '/api/posts') {
+    if (path === '/api/stats') {
       if (method !== 'GET') throw new HttpError(405, '這個方法不被允許');
-      return await listPosts(env, url);
+      return await getStats(env);
     }
 
-    let match = path.match(/^\/api\/posts\/([^/]+)\/comments$/);
-    if (match) {
-      const slug = validSlug(decodeParam(match[1]));
-      if (method === 'GET') return await listComments(env, slug);
-      if (method === 'POST') return await createComment(request, env, slug);
+    if (path === '/api/notes') {
+      if (method === 'GET') return await listNotes(env, url);
+      if (method === 'POST') return await createNote(request, env);
       throw new HttpError(405, '這個方法不被允許');
     }
 
-    match = path.match(/^\/api\/posts\/([^/]+)$/);
+    const match = path.match(/^\/api\/notes\/([^/]+)$/);
     if (match) {
-      if (method !== 'GET') throw new HttpError(405, '這個方法不被允許');
-      return await getPost(env, validSlug(decodeParam(match[1])));
-    }
-
-    if (path === '/api/files') {
-      if (method !== 'GET') throw new HttpError(405, '這個方法不被允許');
-      return await listFiles(env);
-    }
-
-    if (path.startsWith('/api/files/')) {
-      if (method !== 'GET' && method !== 'HEAD') throw new HttpError(405, '這個方法不被允許');
-      return await downloadFile(request, env, decodeParam(path.slice('/api/files/'.length)));
+      const id = parseId(match[1]);
+      if (method === 'GET') return ok(await findNote(requireDB(env), id));
+      if (method === 'PATCH') return await updateNote(request, env, id);
+      if (method === 'DELETE') return await deleteNote(env, id);
+      throw new HttpError(405, '這個方法不被允許');
     }
 
     throw new HttpError(404, '找不到這個 API');
@@ -323,7 +289,7 @@ export default {
       });
     }
 
-    // 沒有副檔名的路徑交給前端路由（例如 /posts/hello-edge）。
+    // 沒有副檔名的路徑交給前端路由（SPA fallback）。
     if (!/\.[a-zA-Z0-9]+$/.test(url.pathname)) {
       return env.ASSETS.fetch(new URL('/index.html', url));
     }
