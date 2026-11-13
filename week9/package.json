@@ -1,8 +1,32 @@
 {
-  "name": "edgememo",
+  "name": "@fifi1060411/fidog",
   "version": "1.0.0",
-  "private": true,
   "description": "EdgeMemo：在 Cloudflare Workers + D1 上運行的備忘錄網站",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "cloudflare",
+    "cloudflare-workers",
+    "d1",
+    "notes",
+    "memo",
+    "serverless",
+    "spa"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "src",
+    "public",
+    "schema.sql",
+    "seed.sql",
+    "wrangler.jsonc",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
